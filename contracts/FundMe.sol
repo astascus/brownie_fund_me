@@ -1,0 +1,82 @@
+//SPDX-License-Identifier: MIT
+
+pragma solidity ^0.6.6;
+
+import "@chainlink/contracts/src/v0.6/interfaces/AggregatorV3Interface.sol";
+import "@chainlink/contracts/src/v0.6/vendor/SafeMathChainlink.sol"; //interface to prevent overflow - common is zeplin
+
+contract FundMe {
+    using SafeMathChainlink for uint256;
+    //uses imported contract for the specified variable type
+
+    mapping(address => uint256) public addressToAmountFunded;
+    address[] public funders;
+    address public owner;
+    AggregatorV3Interface public priceFeed;
+
+    constructor(address _priceFeed) public {
+        priceFeed = AggregatorV3Interface(_priceFeed);
+        owner = msg.sender;
+    }
+
+    //payable keyword allows function to pay for things (use currency)
+    function fund() public payable {
+        uint256 minimumUSD = 50 * 10**18;
+        require(
+            getConversionRate(msg.value) >= minimumUSD,
+            "You need to spend more ETH"
+        );
+
+        //msg.sender and msg.value are keywords in every contract call
+        //msg.sender is the address of the sender and msg.value is the amount sent
+        addressToAmountFunded[msg.sender] += msg.value;
+
+        funders.push(msg.sender);
+    }
+
+    function getVersion() public view returns (uint256) {
+        return priceFeed.version();
+    }
+
+    //find ETH -> USD conversion rate
+    function getPrice() public view returns (uint256) {
+        (, int256 answer, , , ) = priceFeed.latestRoundData();
+        return uint256(answer * 10000000000);
+    }
+
+    function getConversionRate(uint256 ethAmount)
+        public
+        view
+        returns (uint256)
+    {
+        uint256 ethPrice = getPrice();
+        uint256 ethAmountInUSD = (ethPrice * ethAmount) / 1000000000000000000;
+        return ethAmountInUSD;
+    }
+
+    function getEntranceFee() public view returns (uint256) {
+        //minimum USD
+        uint256 minimumUSD = 50 * 10**18;
+        uint256 price = getPrice();
+        uint256 precision = 1 * 10**18;
+        return ((minimumUSD * precision) / price);
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner);
+        _;
+    }
+
+    function withdraw() public payable onlyOwner {
+        msg.sender.transfer(address(this).balance);
+        for (
+            uint256 funderIndex = 0;
+            funderIndex < funders.length;
+            funderIndex++
+        ) {
+            address funder = funders[funderIndex];
+            addressToAmountFunded[funder] = 0;
+        }
+        funders = new address[](0);
+    }
+}
